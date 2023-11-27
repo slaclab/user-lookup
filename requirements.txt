@@ -1,0 +1,6 @@
+fastapi
+strawberry-graphql[fastapi]==0.215.1
+uvicorn
+uvicorn[standard]
+pydantic
+bonsai
