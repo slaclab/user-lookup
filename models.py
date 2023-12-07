@@ -19,6 +19,7 @@ class UserInput:
     preferredemail: Optional[str] = UNSET
     shell: Optional[str] = UNSET
     homedirectory: Optional[str] = UNSET
+    #sources: Optional[list] = UNSET
 
 @strawberry.type
 class User(UserInput):
