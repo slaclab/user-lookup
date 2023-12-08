@@ -24,7 +24,6 @@ SOURCE_LDAP_BIND_PASSWORD = environ.get('SOURCE_LDAP_BIND_PASSWORD',None)
 SOURCE_LDAP_CLIENT = LDAPClient( SOURCE_LDAP_SERVER )
 if SOURCE_LDAP_BIND_USERNAME and SOURCE_LDAP_BIND_PASSWORD:
     SOURCE_LDAP_CLIENT.set_credentials("SIMPLE", user=SOURCE_LDAP_BIND_USERNAME, password=SOURCE_LDAP_BIND_PASSWORD)
-SOURCE_LDAP_DB = SOURCE_LDAP_CLIENT.connect()
 
 logging.info(f"connecting to {SOURCE_LDAP_SERVER} with {SOURCE_LDAP_BIND_USERNAME}, using basedn {SOURCE_LDAP_USER_BASEDN}")
 
@@ -98,6 +97,8 @@ class Query:
     @strawberry.field
     def users(self, info: Info, filter: UserInput ) -> List[User]:
         logging.info(f"querying for {user_filter(filter)}")
-        e = SOURCE_LDAP_DB.search( SOURCE_LDAP_USER_BASEDN, bonsai.LDAPSearchScope.SUB, user_filter( filter ) )
-        #logging.debug(f"found {e}")
-        return map_entities_to_users( e )
+        ans = None
+        with SOURCE_LDAP_CLIENT.connect() as conn:
+            ans = conn.search( SOURCE_LDAP_USER_BASEDN, bonsai.LDAPSearchScope.SUB, user_filter( filter ) )
+        #logging.debug(f"found {ans}")
+        return map_entities_to_users( ans )
