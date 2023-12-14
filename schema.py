@@ -10,6 +10,8 @@ from models import User, UserInput
 import bonsai
 from bonsai import LDAPClient
 
+import requests
+
 from os import environ
 import logging
 
@@ -33,6 +35,12 @@ if SOURCE_LDAP_BIND_USERNAME and SOURCE_LDAP_BIND_PASSWORD:
     SOURCE_LDAP_CLIENT.set_credentials("SIMPLE", user=SOURCE_LDAP_BIND_USERNAME, password=SOURCE_LDAP_BIND_PASSWORD)
 
 logging.info(f"connecting to {SOURCE_LDAP_SERVER} with {SOURCE_LDAP_BIND_USERNAME}, using basedn {SOURCE_LDAP_USER_BASEDN}")
+
+# https://stackoverflow.com/questions/480214/how-do-i-remove-duplicates-from-a-list-while-preserving-order
+def f7(seq):
+    seen = set()
+    seen_add = seen.add
+    return [x for x in seq if not (x in seen or seen_add(x))]
 
 def map_entities_to_users( entity: List[dict], overrides: dict={ 
       'dn': ['distinguishedName','dn'],
@@ -82,23 +90,32 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
         #  LOG.debug("account is disabled")
         #  continue
         username = _get(e,'username').split('@').pop(0)
-        preferredemail = _get(e,'preferredemail')
         eppns = _get(e,'mail', pop=False, aggregate=True )
+
+        preferredemail = _get(e,'preferredemail')
+
+        # hack to get the actual prefered address until the ldap has the correct data
+        urawi_email = fetch_urawi_user_info( username )
+        if urawi_email:
+            preferredemail = urawi_email
+        
         if not preferredemail == None:
           eppns.insert(0,preferredemail)
-        # FIXME: just ignore those without valid eppns for now
-        eppns = list(set(eppns))
+
         if len(eppns) == 0:
           LOG.warn(f"no valid eppns found")
           continue
+
+        eppns = f7(eppns)
+        # create the user object
         u = User(
             dn=_get(e,'dn'),
             username=username,
             fullname=_get(e,'fullname'),
             uidnumber=_get(e,'uidnumber'),
             shell=_get(e,'loginShell'),
-            eppns=list(set(eppns)),
-            preferredemail=preferredemail,
+            eppns=eppns,
+            preferredemail=eppns[0],
             homedirectory=e['homeDirectory'][0] if 'homeDirectory' in e else f"/sdf/home/{username[0]}/{username}"
         )
         LOG.debug(f"created {u}")
@@ -120,6 +137,18 @@ def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName' } )
             array.append( f'({this}={v})' )
             # deal with wild card fullname search
     return f"(&(objectclass=person){''.join(array)})"
+
+def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userportal.slac.stanford.edu/apps/urawi/ws/user_info?psdAuthToken={token}&userid={userid}" ) -> str:
+    if token == None:
+        token = environ.get('URAWI_TOKEN')
+    r = requests.get(url.format( userid=userid, token=token )).json()
+    LOG.debug(f"urawi request for {userid}: {r}")
+    if 'data' in r and 'preferredemail' in r['data']:
+        LOG.debug(f"  found {r['data']['preferredemail']}")
+        return r['data']['preferredemail'] 
+    LOG.debug(f"  not found")
+    return None
+
 
 @strawberry.type
 class Query:

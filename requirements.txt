@@ -4,3 +4,4 @@ uvicorn
 uvicorn[standard]
 pydantic
 bonsai
+requests
