@@ -128,7 +128,7 @@ def reduce_filter( filter ) -> dict:
             d[k] = v
     return d
 
-def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName' } ) -> str:
+def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName', 'preferredemail': 'extensionAttribute5' } ) -> str:
     d = reduce_filter( filter )
     array = []
     for k,v in d.items():
