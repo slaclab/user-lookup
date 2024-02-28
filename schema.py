@@ -48,7 +48,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
       'uidnumber': 'uidNumber',
       'fullname': ['displayName', 'gecos'],
       'preferredemail': ['extensionAttribute5','extensionAttribute11'], 
-      'mail': [ 'mail', 'extensionAttribute12' ],
+      'mail': [ 'mail', 'extensionAttribute12', 'extensionAttribute11' ],
     }, pop=True ) -> User:
 
     def _get( e, field, pop=True, aggregate=False ):

@@ -47,3 +47,7 @@ start:
 
 start-container:
 	$(CONTAINER_RT) run -p 8000:8000 $(APP_MOUNT) -e DEBUG=$(DEBUG) -e URAWI_TOKEN=$(shell cat etc/.secrets/urawi.token) -e SOURCE_LDAP_SERVER=$(LDAP_SERVER) -e SOURCE_LDAP_BIND_USERNAME=$(LDAP_BIND_USERNAME) -e SOURCE_LDAP_BIND_PASSWORD='$(shell cat etc/.secrets/ldap.password)' -e SOURCE_LDAP_USER_BASEDN=$(LDAP_USER_BASEDN) -it $(REPO)/$(POD):$(TAG) 
+
+query:
+	curl sdfiana007:8000/graphql -X POST -H 'content-type: application/json' --data '{ "query":  "query{ users(filter: {username: \"ytl\"}) {    username  uidnumber    preferredemail eppns } }"  }'
+
