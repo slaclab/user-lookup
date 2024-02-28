@@ -128,13 +128,25 @@ def reduce_filter( filter ) -> dict:
             d[k] = v
     return d
 
-def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName', 'preferredemail': 'extensionAttribute5' } ) -> str:
+def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName', 'preferredemail': 'extensionAttribute5', 'eppns': [ 'mail', 'extensionAttribute12', 'extensionAttribute11' ] } ) -> str:
     d = reduce_filter( filter )
     array = []
     for k,v in d.items():
+        #LOG.debug(f"building filter: {k}, {v} ({type(keys[k])})")
         if k in keys:
-            this = keys[k]
-            array.append( f'({this}={v})' )
+            if type(keys[k]) == str:
+              this = keys[k]
+              array.append( f'({this}={v})' )
+            # assume OR for lists
+            elif type(keys[k]) == list:
+              orlist = []
+              this_v = v
+              if k in ( 'eppns', ):
+                this_v = v[0]
+              for i in keys[k]:
+                orlist.append( f'({i}={this_v})' )
+              this = f"(|{''.join( orlist )})"
+              array.append( this )
             # deal with wild card fullname search
     return f"(&(objectclass=person){''.join(array)})"
 
