@@ -25,16 +25,26 @@ except:
   pass
 logging.basicConfig( level=logging.DEBUG if DEBUG else logging.INFO )
 
+# SOURCE_LDAP: maps to the Windows ldap instance
 SOURCE_LDAP_SERVER = environ.get('SOURCE_LDAP_SERVER', 'ldaps://sdfldap001.sdf.slac.stanford.edu' )
 SOURCE_LDAP_USER_BASEDN = environ.get('SOURCE_LDAP_USER_BASEDN',None)
 SOURCE_LDAP_BIND_USERNAME = environ.get('SOURCE_LDAP_BIND_USERNAME',None)
 SOURCE_LDAP_BIND_PASSWORD = environ.get('SOURCE_LDAP_BIND_PASSWORD',None)
+
+# Load SDF LDAP env variables
+SDF_LDAP_SERVER = environ.get('SDF_LDAP_SERVER', 'ldaps://sdf-ldap.slac.stanford.edu')
+SDF_LDAP_USER_BASEDN = environ.get('SDF_LDAP_USER_BASEDN', None)
 
 SOURCE_LDAP_CLIENT = LDAPClient( SOURCE_LDAP_SERVER )
 if SOURCE_LDAP_BIND_USERNAME and SOURCE_LDAP_BIND_PASSWORD:
     SOURCE_LDAP_CLIENT.set_credentials("SIMPLE", user=SOURCE_LDAP_BIND_USERNAME, password=SOURCE_LDAP_BIND_PASSWORD)
 
 logging.info(f"connecting to {SOURCE_LDAP_SERVER} with {SOURCE_LDAP_BIND_USERNAME}, using basedn {SOURCE_LDAP_USER_BASEDN}")
+
+SDF_LDAP_CLIENT = LDAPClient( SDF_LDAP_SERVER )
+logging.info(f"connecting to {SDF_LDAP_SERVER} with anonymous bind, using basedn {SDF_LDAP_USER_BASEDN}")
+
+
 
 # https://stackoverflow.com/questions/480214/how-do-i-remove-duplicates-from-a-list-while-preserving-order
 def f7(seq):
@@ -106,6 +116,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
           LOG.warn(f"no valid eppns found")
           continue
 
+        gidNumber = fetch_gidNumber(username)
         eppns = f7(eppns)
         # create the user object
         u = User(
@@ -113,6 +124,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
             username=username,
             fullname=_get(e,'fullname'),
             uidnumber=_get(e,'uidnumber'),
+            gidnumber=gidNumber,
             shell=_get(e,'loginShell'),
             eppns=eppns,
             preferredemail=eppns[0],
@@ -161,6 +173,44 @@ def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userp
     LOG.debug(f"  not found")
     return None
 
+
+def fetch_gidNumber(username: str) -> Optional[int]:
+    """Look up gidNumber for a user from the sdf-ldap source."""
+    try:
+        with SDF_LDAP_CLIENT.connect() as conn:
+            results = conn.search(
+                SDF_LDAP_USER_BASEDN,
+                bonsai.LDAPSearchScope.SUB,
+                f"(&(objectclass=posixAccount)(uid={username}))",
+                attrlist=['gidNumber']
+            )
+            if results and 'gidNumber' in results[0]:
+                return int(results[0]['gidNumber'][0])
+    except Exception as e:
+        LOG.warning(f"Failed to fetch gidNumber for {username}: {e}")
+    return None
+
+def fetch_secondaryGidNumbers(username: str) -> Optional[List[int]]:
+    """Fetch all gidNumbers for posixGroups where the user is a member."""
+    try:
+        with SDF_LDAP_CLIENT.connect() as conn:
+            results = conn.search(
+                "ou=Group,dc=sdf,dc=slac,dc=stanford,dc=edu",
+                bonsai.LDAPSearchScope.SUB,
+                f"(memberUid={username})",
+                attrlist=['gidNumber']
+            )
+            gidnumbers = []
+            for entry in results:
+                if 'gidNumber' in entry:
+                    try:
+                        gidnumbers.append(int(entry['gidNumber'][0]))
+                    except Exception as e:
+                        LOG.warning(f"Invalid gidNumber in group entry: {e}")
+            return gidnumbers if gidnumbers else None
+    except Exception as e:
+        LOG.warning(f"Failed to fetch group gidNumbers for {username}: {e}")
+    return None
 
 @strawberry.type
 class Query:
