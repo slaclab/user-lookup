@@ -117,6 +117,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
           continue
 
         gidNumber = fetch_gidNumber(username)
+        secondary_gidNumbers = fetch_secondaryGidNumbers(username)
         eppns = f7(eppns)
         # create the user object
         u = User(
@@ -125,6 +126,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
             fullname=_get(e,'fullname'),
             uidnumber=_get(e,'uidnumber'),
             gidnumber=gidNumber,
+            secondaryGidNumbers=secondary_gidNumbers,
             shell=_get(e,'loginShell'),
             eppns=eppns,
             preferredemail=eppns[0],
