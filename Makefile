@@ -14,7 +14,7 @@ LDAP_USER_BASEDN ?= DC=win,DC=slac,DC=Stanford,DC=edu
 LDAP_BIND_USERNAME ?= CN=osmaint,OU=Service-Accounts,OU=SCS,DC=win,DC=slac,DC=stanford,DC=edu
 SECRET_PATH ?= secret/tid/scs/osmaint
 
-SDF_LDAP_SERVER ?= ldaps://sdf-ldap.slac.stanford.edu
+SDF_LDAP_SERVER ?= ldaps://sdfldap001.sdf.slac.stanford.edu
 SDF_LDAP_USER_BASEDN ?= dc=sdf,dc=slac,dc=stanford,dc=edu
 
 

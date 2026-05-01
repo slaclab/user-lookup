@@ -32,8 +32,8 @@ SOURCE_LDAP_BIND_USERNAME = environ.get('SOURCE_LDAP_BIND_USERNAME',None)
 SOURCE_LDAP_BIND_PASSWORD = environ.get('SOURCE_LDAP_BIND_PASSWORD',None)
 
 # Load SDF LDAP env variables
-SDF_LDAP_SERVER = environ.get('SDF_LDAP_SERVER', 'ldaps://sdf-ldap.slac.stanford.edu')
-SDF_LDAP_USER_BASEDN = environ.get('SDF_LDAP_USER_BASEDN', None)
+SDF_LDAP_SERVER = environ.get('SDF_LDAP_SERVER', 'ldaps://sdfldap001.sdf.slac.stanford.edu')
+SDF_LDAP_USER_BASEDN = environ.get('SDF_LDAP_USER_BASEDN')
 
 SOURCE_LDAP_CLIENT = LDAPClient( SOURCE_LDAP_SERVER )
 if SOURCE_LDAP_BIND_USERNAME and SOURCE_LDAP_BIND_PASSWORD:
