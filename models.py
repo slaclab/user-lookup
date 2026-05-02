@@ -19,6 +19,8 @@ class UserInput:
     preferredemail: Optional[str] = UNSET
     shell: Optional[str] = UNSET
     homedirectory: Optional[str] = UNSET
+    gidNumber: Optional[int] = None
+    secondaryGidNumbers: Optional[List[int]] = None
     #sources: Optional[list] = UNSET
 
 @strawberry.type
