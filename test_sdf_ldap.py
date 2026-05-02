@@ -38,7 +38,7 @@ def test_fetch_secondaryGidNumbers(username):
     return result
 
 if __name__ == "__main__":
-    usernames = sys.argv[1:] if len(sys.argv) > 1 else ["ytl"]
+    usernames = sys.argv[1:] if len(sys.argv) > 1 else []
 
     test_connection()
 
