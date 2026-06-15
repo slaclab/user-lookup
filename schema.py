@@ -125,7 +125,7 @@ def map_entities_to_users( entity: List[dict], overrides: dict={
             username=username,
             fullname=_get(e,'fullname'),
             uidnumber=_get(e,'uidnumber'),
-            gidnumber=gidNumber,
+            gidNumber=gidNumber,
             secondaryGidNumbers=secondary_gidNumbers,
             shell=_get(e,'loginShell'),
             eppns=eppns,
@@ -179,17 +179,19 @@ def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userp
 def fetch_gidNumber(username: str) -> Optional[int]:
     """Look up gidNumber for a user from the sdf-ldap source."""
     try:
-        with SDF_LDAP_CLIENT.connect() as conn:
+        with SOURCE_LDAP_CLIENT.connect() as conn:
             results = conn.search(
-                SDF_LDAP_USER_BASEDN,
+                SOURCE_LDAP_USER_BASEDN,
                 bonsai.LDAPSearchScope.SUB,
-                f"(&(objectclass=posixAccount)(uid={username}))",
+                f"(uid={username})",
                 attrlist=['gidNumber']
             )
             if results and 'gidNumber' in results[0]:
                 return int(results[0]['gidNumber'][0])
+            else:
+                LOG.warning(f"No entry found for {username} in SOURCE_LDAP")
     except Exception as e:
-        LOG.warning(f"Failed to fetch gidNumber for {username}: {e}")
+        LOG.warning(f"Failed to fetch gidNumber for {username}: {e}")    
     return None
 
 def fetch_secondaryGidNumbers(username: str) -> Optional[List[int]]:
