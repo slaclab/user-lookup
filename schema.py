@@ -167,7 +167,7 @@ def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName', 'p
 def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userportal.slac.stanford.edu/apps/urawi/ws/user_info?psdAuthToken={token}&userid={userid}" ) -> str:
     if token == None:
         token = environ.get('URAWI_TOKEN')
-    r = requests.get(url.format( userid=userid, token=token )).json()
+    r = requests.get(url.format( userid=userid, token=token ), timeout=1).json()
     LOG.debug(f"urawi request for {userid}: {r}")
     if 'data' in r and 'preferredemail' in r['data']:
         LOG.debug(f"  found {r['data']['preferredemail']}")
