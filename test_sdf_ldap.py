@@ -7,19 +7,24 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from schema import (
-    fetch_gidNumber,
-    fetch_secondaryGidNumbers,
+    LDAP_RETRIES,
+    LDAP_TIMEOUT,
     SDF_LDAP_CLIENT,
     SDF_LDAP_SERVER,
     SDF_LDAP_USER_BASEDN,
+    fetch_gidNumber,
+    fetch_secondaryGidNumbers,
 )
+
 
 def test_connection():
     print(f"SDF_LDAP_SERVER:      {SDF_LDAP_SERVER}")
     print(f"SDF_LDAP_USER_BASEDN: {SDF_LDAP_USER_BASEDN}")
+    print(f"LDAP_TIMEOUT:         {LDAP_TIMEOUT}s")
+    print(f"LDAP_RETRIES:         {LDAP_RETRIES}")
     print()
     try:
-        with SDF_LDAP_CLIENT.connect() as conn:
+        with SDF_LDAP_CLIENT.connect(timeout=LDAP_TIMEOUT) as conn:
             print("Connection OK")
     except Exception as e:
         print(f"Connection FAILED: {e}")
