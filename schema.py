@@ -80,7 +80,7 @@ def f7(seq):
     seen_add = seen.add
     return [x for x in seq if not (x in seen or seen_add(x))]
 
-def map_entities_to_users( entity: List[dict], overrides: dict={ 
+def map_entities_to_users( entity: list[dict], overrides: dict={ 
       'dn': ['distinguishedName','dn'],
       'username': [ 'extensionAttribute11', 'uid', 'userPrincipalName' ], 
       'uidnumber': 'uidNumber',
