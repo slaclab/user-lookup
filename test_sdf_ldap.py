@@ -6,7 +6,7 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
-from schema import (
+from ldap_posix import (
     LDAP_RETRIES,
     LDAP_TIMEOUT,
     SDF_LDAP_CLIENT,

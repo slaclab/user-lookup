@@ -57,3 +57,27 @@ start-container:
 query:
 	curl sdfiana007:8000/graphql -X POST -H 'content-type: application/json' --data '{ "query":  "query{ users(filter: {username: \"ytl\"}) {    username  uidnumber    preferredemail eppns } }"  }'
 
+# --- LDAP -> coact posix (uid/gid) migration and sync -------------------------------------------
+# LDAP is read-only here; writes go to coact-api. Point COACT_API_URL at dev first.
+COACT_API_URL ?= http://coact-api-service:8000/graphql-service
+COACT_SYNC_USERNAME ?= user-lookup-bot
+SDF_LDAP_GROUP_BASEDN ?= ou=Group,dc=sdf,dc=slac,dc=stanford,dc=edu
+MIGRATION_OUT ?= ./migration
+
+POSIX_ENV = SOURCE_LDAP_SERVER=$(LDAP_SERVER) SOURCE_LDAP_USER_BASEDN=$(LDAP_USER_BASEDN) \
+	SOURCE_LDAP_BIND_USERNAME=$(LDAP_BIND_USERNAME) SOURCE_LDAP_BIND_PASSWORD='$(shell cat etc/.secrets/ldap.password)' \
+	SDF_LDAP_SERVER=$(SDF_LDAP_SERVER) SDF_LDAP_GROUP_BASEDN=$(SDF_LDAP_GROUP_BASEDN) \
+	COACT_API_URL=$(COACT_API_URL) COACT_SYNC_USERNAME=$(COACT_SYNC_USERNAME)
+
+migrate-dry-run:
+	$(POSIX_ENV) $(PYTHON_BIN) migrate_posix.py --out $(MIGRATION_OUT)
+
+migrate-apply:
+	$(POSIX_ENV) $(PYTHON_BIN) migrate_posix.py --out $(MIGRATION_OUT) --apply
+
+sync-dry-run:
+	$(POSIX_ENV) $(PYTHON_BIN) sync_posix.py --dry-run
+
+sync:
+	$(POSIX_ENV) $(PYTHON_BIN) sync_posix.py
+
