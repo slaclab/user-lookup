@@ -3,14 +3,20 @@
 One-shot migration: populate coact users with the uid/gid data currently in LDAP.
 
 Steps
-  1. read the full posix snapshot from LDAP and save it to --out/snapshot-<ts>.json
+  1. read uid/primary gid from AD (one paged search) and secondary gids from SDF LDAP, keep only coact's
+     (non-bot) users and save it to --out/snapshot-<ts>.json
   2. dry-run usersPosixSync against coact-api and write a human-readable report next to it
-  3. sanity checks (snapshot size, coact coverage, secondary gids present); stop unless they pass
+  3. sanity checks (coact coverage, secondary gids present); stop unless they pass
   4. with --apply: run usersPosixSync for real with force=true (the first run necessarily changes every
      user, which trips coact-api's churn guard by design), then print posixSyncStatus
 
 Re-running after a successful apply is safe and should report changed=0.
-LDAP is only read. All writes go to coact-api (dev first: COACT_API_URL=http://coact-api-service:8000/graphql-service).
+LDAP is only read. All writes go to coact-api. Needs AD credentials, so run it in the user-lookup deployment
+(the CronJob has none), e.g.
+  kubectl exec deploy/user-lookup -- env COACT_API_URL=http://coact-api-service:8000/graphql-service \
+      python migrate_posix.py --out /tmp/migration [--apply --yes]
+After the migration, the CronJob (sync_posix.py) only reconciles secondary gids; new users are initialised
+at registration.
 
 Env: SOURCE_LDAP_*, SDF_LDAP_SERVER, SDF_LDAP_GROUP_BASEDN, COACT_API_URL, COACT_SYNC_USERNAME.
 """
@@ -25,14 +31,15 @@ from os import environ, makedirs, path
 LOG = logging.getLogger("migrate_posix")
 
 
-def report_text(snapshot: list, res: dict) -> str:
+def report_text(requested: int, snapshot: list, res: dict) -> str:
     with_secondary = sum(1 for e in snapshot if e['secondarygids'])
     no_gid = [e['username'] for e in snapshot if e['gidnumber'] is None]
     lines = [
         "LDAP posix -> coact migration report",
         f"generated: {datetime.now(timezone.utc).isoformat()}",
         "",
-        f"LDAP accounts in snapshot:            {len(snapshot)}",
+        f"coact users requested from LDAP:      {requested}",
+        f"found in LDAP (snapshot):             {len(snapshot)}",
         f"  with >=1 secondary gid:             {with_secondary}",
         f"  with no primary gid:                {len(no_gid)}",
         f"coact users matched in snapshot:      {res['matched']}",
@@ -53,10 +60,8 @@ def report_text(snapshot: list, res: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def sanity_checks(snapshot: list, res: dict, min_accounts: int, min_coverage: float) -> list:
+def sanity_checks(snapshot: list, res: dict, min_coverage: float) -> list:
     problems = []
-    if len(snapshot) < min_accounts:
-        problems.append(f"snapshot has {len(snapshot)} accounts, expected at least {min_accounts} (paging or filter problem?)")
     if not any(e['secondarygids'] for e in snapshot):
         problems.append("no account has any secondary gid: SDF_LDAP group search returned nothing (check SDF_LDAP_SERVER / SDF_LDAP_GROUP_BASEDN)")
     coact_users = res['matched'] + len(res['unknownUsers'])
@@ -70,7 +75,6 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--out', default='./migration', help='directory for snapshot + report files')
     p.add_argument('--apply', action='store_true', help='write to coact after the dry run and sanity checks pass')
-    p.add_argument('--min-accounts', type=int, default=1000, help='minimum LDAP accounts expected in the snapshot')
     p.add_argument('--min-coverage', type=float, default=0.95, help='minimum fraction of coact users that must be present in LDAP')
     p.add_argument('--yes', action='store_true', help='do not prompt for confirmation before applying')
     p.add_argument('-v', '--verbose', action='store_true')
@@ -84,8 +88,10 @@ def main(argv=None) -> int:
     ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     makedirs(args.out, exist_ok=True)
 
-    # 1. snapshot
-    snapshot = build_snapshot()
+    # 1. snapshot of the coact users
+    client = CoactClient()
+    usernames = client.posix_sync_usernames(include_unsynced=True)
+    snapshot = build_snapshot(usernames)
     snap_file = path.join(args.out, f"snapshot-{ts}.json")
     with open(snap_file, 'w') as f:
         json.dump(snapshot, f, indent=1)
@@ -95,9 +101,8 @@ def main(argv=None) -> int:
         return 1
 
     # 2. dry run + report
-    client = CoactClient()
     res = client.users_posix_sync(snapshot, dry_run=True)
-    report = report_text(snapshot, res)
+    report = report_text(len(usernames), snapshot, res)
     report_file = path.join(args.out, f"report-{ts}.txt")
     with open(report_file, 'w') as f:
         f.write(report)
@@ -105,7 +110,7 @@ def main(argv=None) -> int:
     LOG.info(f"wrote report to {report_file}")
 
     # 3. sanity
-    problems = sanity_checks(snapshot, res, args.min_accounts, args.min_coverage)
+    problems = sanity_checks(snapshot, res, args.min_coverage)
     if problems:
         for pr in problems:
             LOG.error(f"sanity check failed: {pr}")

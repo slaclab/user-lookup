@@ -1,9 +1,9 @@
 """
 LDAP POSIX identity reads (uidNumber, primary gidNumber, secondary gidNumbers).
 
-Single home for both the per-user lookups used by the GraphQL API and the bulk snapshot used by
-migrate_posix.py / sync_posix.py, so that all paths derive identity the same way (keyed on AD `uid`)
-and share the same timeout / retry behaviour.
+Single home for both the per-user lookups used by the GraphQL API and the snapshot of coact users
+used by migrate_posix.py / sync_posix.py, so that all paths derive identity the same way (keyed on AD
+`uid`) and share the same timeout / retry behaviour.
 
 Two directories are involved:
   SOURCE_LDAP (AD)  - person entries carrying uidNumber / gidNumber
@@ -13,7 +13,7 @@ Two directories are involved:
 import logging
 import time
 from os import environ
-from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar
 
 import bonsai
 from bonsai import LDAPClient
@@ -132,7 +132,9 @@ def fetch_secondaryGidNumbers(username: str) -> Optional[List[int]]:
 # --- bulk snapshot (migration / recurring sync) -----------------------------------------------
 
 def fetch_all_posix_accounts() -> Dict[str, Tuple[Optional[int], Optional[int]]]:
-    """All person entries with a uidNumber, keyed by uid -> (uidNumber, gidNumber)."""
+    """All person entries with a uidNumber, keyed by uid -> (uidNumber, gidNumber). One paged search on the indexed
+    uidNumber attribute (uid itself is not indexed in AD, so per-user/batched uid filters are more expensive).
+    Used only by the one-time migration; the periodic sync does not read AD."""
     results = ldap_paged_search(SOURCE_LDAP_CLIENT, SOURCE_LDAP_USER_BASEDN,
                                 "(&(objectclass=person)(uidNumber=*))",
                                 attrlist=['uid', 'uidNumber', 'gidNumber'],
@@ -145,15 +147,18 @@ def fetch_all_posix_accounts() -> Dict[str, Tuple[Optional[int], Optional[int]]]
         uid = str(entry['uid'][0])
         if uid in accounts:
             dupes += 1
-            LOG.warning(f"duplicate uid {uid} in SOURCE_LDAP ({entry.get('dn')}); keeping first")
             continue
         accounts[uid] = (_first_int(entry, 'uidNumber'), _first_int(entry, 'gidNumber'))
-    LOG.info(f"fetched {len(accounts)} posix accounts from SOURCE_LDAP ({dupes} duplicate uids skipped)")
+    LOG.info(f"fetched {len(accounts)} posix accounts from SOURCE_LDAP ({dupes} duplicate uids skipped, first kept)")
     return accounts
 
 
-def fetch_all_posix_groups() -> Dict[str, Set[int]]:
+def fetch_all_posix_groups() -> Tuple[Dict[str, Set[int]], int]:
     """All posixGroup entries inverted to memberUid -> {gidNumber}.
+
+    Reads every group (~3k entries from the directory coactd manages): groups are what the server returns,
+    so filtering by member would return the same large groups once per batch. Callers keep only the requested
+    users' memberships. Returns (memberUid -> {gidNumber}, number of groups read).
 
     NIS-style split groups (e.g. atlas-a / atlas-b) share one gidNumber on purpose; the set dedupes
     them, which is exactly what fetch_secondaryGidNumbers returns for a member of only one shard.
@@ -171,17 +176,20 @@ def fetch_all_posix_groups() -> Dict[str, Set[int]]:
         for uid in entry.get('memberUid', []) or []:
             members.setdefault(str(uid), set()).add(gid)
     LOG.info(f"fetched {groups} posixGroups from SDF_LDAP covering {len(members)} distinct members")
-    return members
+    return members, groups
 
 
-def build_snapshot() -> List[dict]:
-    """Join accounts and groups into the usersPosixSync payload:
-    [{username, uidnumber, gidnumber, secondarygids}] for every account in SOURCE_LDAP."""
+def build_snapshot(usernames: Optional[Iterable[str]] = None) -> List[dict]:
+    """One-time migration payload for usersPosixSync: [{username, uidnumber, gidnumber, secondarygids}] from AD
+    (uid/primary gid) + SDF LDAP (secondary gids), restricted to `usernames` (the coact users) when given."""
     accounts = fetch_all_posix_accounts()
-    groups = fetch_all_posix_groups()
+    groups, _ = fetch_all_posix_groups()
+    wanted = set(usernames) if usernames is not None else None
     snapshot = []
     with_secondary = 0
     for uid, (uidnumber, gidnumber) in accounts.items():
+        if wanted is not None and uid not in wanted:
+            continue
         secondary = sorted(groups.get(uid, set()))
         if secondary:
             with_secondary += 1
@@ -191,7 +199,16 @@ def build_snapshot() -> List[dict]:
             "gidnumber": gidnumber,
             "secondarygids": secondary,
         })
-    orphan_members = len(set(groups) - set(accounts))
-    LOG.info(f"snapshot: {len(snapshot)} accounts, {with_secondary} with secondary gids, "
-             f"{orphan_members} group members with no SOURCE_LDAP account (ignored)")
+    scope = f"of {len(wanted)} requested users" if wanted is not None else "accounts"
+    LOG.info(f"snapshot: {len(snapshot)} {scope}, {with_secondary} with secondary gids")
     return snapshot
+
+
+def build_secondary_snapshot(usernames: Iterable[str]) -> Tuple[List[dict], int]:
+    """Periodic-sync payload for usersSecondaryGidsSync: one [{username, secondarygids}] entry per requested user
+    (empty list when the user is in no posixGroup), from SDF LDAP only. Returns (entries, posixGroups read)."""
+    groups, group_count = fetch_all_posix_groups()
+    entries = [{"username": u, "secondarygids": sorted(groups.get(u, set()))} for u in sorted(set(usernames))]
+    with_secondary = sum(1 for e in entries if e["secondarygids"])
+    LOG.info(f"secondary snapshot: {len(entries)} users, {with_secondary} with secondary gids, {group_count} posixGroups")
+    return entries, group_count

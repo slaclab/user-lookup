@@ -1,5 +1,5 @@
 """
-Minimal GraphQL client for pushing LDAP posix snapshots into coact-api.
+Minimal GraphQL client for the LDAP posix sync: which users to read, and pushing their snapshot to coact-api.
 
 Identity is asserted with the same header coact-api trusts from its ingress (x-vouch-idp-claims-name by
 default), so this must only ever talk to coact-api over the in-cluster service address.
@@ -26,9 +26,21 @@ mutation UsersPosixSync($entries: [UserPosixInput!]!, $dryRun: Boolean!, $force:
 }
 """
 
+POSIX_SYNC_USERNAMES = """
+query PosixSyncUsernames($includeUnsynced: Boolean!) { posixSyncUsernames(includeUnsynced: $includeUnsynced) }
+"""
+
+USERS_SECONDARY_GIDS_SYNC = """
+mutation UsersSecondaryGidsSync($entries: [UserSecondaryGidsInput!]!, $groupCount: Int!, $dryRun: Boolean!, $force: Boolean!) {
+  usersSecondaryGidsSync(entries: $entries, groupCount: $groupCount, dryRun: $dryRun, force: $force) {
+    dryRun total matched changed unknownUsers uidMismatches aborted reason syncedAt unsynced
+  }
+}
+"""
+
 POSIX_SYNC_STATUS = """
 query PosixSyncStatus {
-  posixSyncStatus { lastrun lastsuccess dryRun total matched changed unknownUsers aborted reason }
+  posixSyncStatus { lastrun lastsuccess kind dryRun total matched changed unknownUsers aborted reason groupCount lastGroupCount unsynced }
 }
 """
 
@@ -52,6 +64,14 @@ class CoactClient:
 
     def users_posix_sync(self, entries: List[dict], dry_run: bool, force: bool = False) -> dict:
         return self.execute(USERS_POSIX_SYNC, {"entries": entries, "dryRun": dry_run, "force": force})["usersPosixSync"]
+
+    def posix_sync_usernames(self, include_unsynced: bool = False) -> List[str]:
+        """Non-bot coact users to read from LDAP: initialised users only, or all of them (migration)."""
+        return self.execute(POSIX_SYNC_USERNAMES, {"includeUnsynced": include_unsynced})["posixSyncUsernames"]
+
+    def users_secondary_gids_sync(self, entries: List[dict], group_count: int, dry_run: bool, force: bool = False) -> dict:
+        return self.execute(USERS_SECONDARY_GIDS_SYNC, {"entries": entries, "groupCount": group_count,
+                                                        "dryRun": dry_run, "force": force})["usersSecondaryGidsSync"]
 
     def posix_sync_status(self) -> Optional[dict]:
         return self.execute(POSIX_SYNC_STATUS)["posixSyncStatus"]
