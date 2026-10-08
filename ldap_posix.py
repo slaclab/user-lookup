@@ -118,12 +118,12 @@ def fetch_gidNumber(username: str) -> Optional[int]:
 
 
 def fetch_secondaryGidNumbers(username: str) -> Optional[List[int]]:
-    """gidNumbers of all posixGroups the user is a memberUid of. None when there are none (API contract)."""
+    """gidNumbers of all posixGroups the user is a memberUid of; [] when there are none.
+    None means the LDAP read failed, so callers must not treat it as "no groups" and overwrite stored gids."""
     try:
         results = ldap_search(SDF_LDAP_CLIENT, SDF_LDAP_GROUP_BASEDN, f"(memberUid={username})",
                               attrlist=['gidNumber'], description=f"group gidNumber lookup for {username}")
-        gidnumbers = sorted({g for g in (_first_int(e, 'gidNumber') for e in results) if g is not None})
-        return gidnumbers if gidnumbers else None
+        return sorted({g for g in (_first_int(e, 'gidNumber') for e in results) if g is not None})
     except Exception as e:
         LOG.warning(f"Failed to fetch group gidNumbers for {username}: {e}")
     return None
