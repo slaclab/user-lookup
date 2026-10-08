@@ -1,11 +1,9 @@
 import logging
-import time
 from os import environ
 
 import bonsai
 import requests
 import strawberry
-from bonsai import LDAPClient
 from models import User, UserInput
 from strawberry.arguments import UNSET
 from strawberry.types import Info
@@ -20,58 +18,14 @@ except:
   pass
 logging.basicConfig( level=logging.DEBUG if DEBUG else logging.INFO )
 
-# SOURCE_LDAP: maps to the Windows ldap instance
-SOURCE_LDAP_SERVER = environ.get('SOURCE_LDAP_SERVER', 'ldaps://sdfldap001.sdf.slac.stanford.edu' )
-SOURCE_LDAP_USER_BASEDN = environ.get('SOURCE_LDAP_USER_BASEDN',None)
-SOURCE_LDAP_BIND_USERNAME = environ.get('SOURCE_LDAP_BIND_USERNAME',None)
-SOURCE_LDAP_BIND_PASSWORD = environ.get('SOURCE_LDAP_BIND_PASSWORD',None)
-
-# Load SDF LDAP env variables
-SDF_LDAP_SERVER = environ.get('SDF_LDAP_SERVER', 'ldaps://sdfldap001.sdf.slac.stanford.edu')
-SDF_LDAP_USER_BASEDN = environ.get('SDF_LDAP_USER_BASEDN')
-
-SOURCE_LDAP_CLIENT = LDAPClient( SOURCE_LDAP_SERVER )
-if SOURCE_LDAP_BIND_USERNAME and SOURCE_LDAP_BIND_PASSWORD:
-    SOURCE_LDAP_CLIENT.set_credentials("SIMPLE", user=SOURCE_LDAP_BIND_USERNAME, password=SOURCE_LDAP_BIND_PASSWORD)
-
-LOG.info(f"connecting to {SOURCE_LDAP_SERVER} with {SOURCE_LDAP_BIND_USERNAME}, using basedn {SOURCE_LDAP_USER_BASEDN}")
-
-SDF_LDAP_CLIENT = LDAPClient( SDF_LDAP_SERVER )
-LOG.info(f"connecting to {SDF_LDAP_SERVER} with anonymous bind, using basedn {SDF_LDAP_USER_BASEDN}")
-
-LDAP_TIMEOUT = float( environ.get('LDAP_TIMEOUT', '30.0') )
-LDAP_RETRIES = int( environ.get('LDAP_RETRIES', '3') )
-LDAP_RETRY_BACKOFF = float( environ.get('LDAP_RETRY_BACKOFF', '0.5') )
-
-# errors that will never succeed on a retry, so fail fast on them
-LDAP_FATAL_ERRORS = (
-    bonsai.AuthenticationError,
-    bonsai.InvalidDN,
-    bonsai.NoSuchObjectError,
+# LDAP clients, timeout/retry search helpers and posix (uid/gid) lookups live in ldap_posix.py
+# so the bulk sync (sync_posix.py / migrate_posix.py) shares them with the API.
+from ldap_posix import (
+    SOURCE_LDAP_CLIENT, SOURCE_LDAP_SERVER, SOURCE_LDAP_USER_BASEDN, SOURCE_LDAP_BIND_USERNAME,
+    SDF_LDAP_CLIENT, SDF_LDAP_SERVER, SDF_LDAP_USER_BASEDN,
+    LDAP_TIMEOUT, LDAP_RETRIES, LDAP_RETRY_BACKOFF, LDAP_FATAL_ERRORS,
+    ldap_search, fetch_gidNumber, fetch_secondaryGidNumbers,
 )
-
-
-def ldap_search( client: LDAPClient, base: str, filter_exp: str, attrlist: list[str] | None = None,
-                 scope=bonsai.LDAPSearchScope.SUB, description: str='ldap search' ) -> list[dict]:
-    """Run an ldap search, bounding each attempt with LDAP_TIMEOUT and retrying
-    transient failures up to LDAP_RETRIES times. Raises the last error if every
-    attempt fails."""
-    attempts = LDAP_RETRIES + 1
-    for attempt in range( 1, attempts + 1 ):
-        try:
-            with client.connect( timeout=LDAP_TIMEOUT ) as conn:
-                return conn.search( base, scope, filter_exp, attrlist=attrlist, timeout=LDAP_TIMEOUT )
-        except LDAP_FATAL_ERRORS as e:
-            LOG.warning(f"{description} failed unrecoverably: {e}")
-            raise
-        except (bonsai.LDAPError, OSError) as e:
-            if attempt == attempts:
-                LOG.warning(f"{description} failed after {attempt} attempt(s): {e}")
-                raise
-            delay = LDAP_RETRY_BACKOFF * ( 2 ** ( attempt - 1 ) )
-            LOG.warning(f"{description} failed (attempt {attempt}/{attempts}), retrying in {delay}s: {e}")
-            time.sleep( delay )
-
 
 
 # https://stackoverflow.com/questions/480214/how-do-i-remove-duplicates-from-a-list-while-preserving-order
@@ -203,46 +157,6 @@ def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userp
     LOG.debug(f"  not found")
     return None
 
-
-def fetch_gidNumber(username: str) -> int | None:
-    """Look up gidNumber for a user from the sdf-ldap source."""
-    try:
-        results = ldap_search(
-            SOURCE_LDAP_CLIENT,
-            SOURCE_LDAP_USER_BASEDN,
-            f"(uid={username})",
-            attrlist=['gidNumber'],
-            description=f"gidNumber lookup for {username}"
-        )
-        if results and 'gidNumber' in results[0]:
-            return int(results[0]['gidNumber'][0])
-        else:
-            LOG.warning(f"No entry found for {username} in SOURCE_LDAP")
-    except Exception as e:
-        LOG.warning(f"Failed to fetch gidNumber for {username}: {e}")    
-    return None
-
-def fetch_secondaryGidNumbers(username: str) -> list[int] | None:
-    """Fetch all gidNumbers for posixGroups where the user is a member."""
-    try:
-        results = ldap_search(
-            SDF_LDAP_CLIENT,
-            "ou=Group,dc=sdf,dc=slac,dc=stanford,dc=edu",
-            f"(memberUid={username})",
-            attrlist=['gidNumber'],
-            description=f"group gidNumber lookup for {username}"
-        )
-        gidnumbers = []
-        for entry in results:
-            if 'gidNumber' in entry:
-                try:
-                    gidnumbers.append(int(entry['gidNumber'][0]))
-                except Exception as e:
-                    LOG.warning(f"Invalid gidNumber in group entry: {e}")
-        return gidnumbers if gidnumbers else None
-    except Exception as e:
-        LOG.warning(f"Failed to fetch group gidNumbers for {username}: {e}")
-    return None
 
 @strawberry.type
 class Query:
