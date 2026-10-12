@@ -48,9 +48,10 @@ make sync-dry-run                                                               
 | `SDF_LDAP_SERVER` | `ldaps://sdfldap001.sdf.slac.stanford.edu` | anonymous bind |
 | `SDF_LDAP_GROUP_BASEDN` | `ou=Group,dc=sdf,dc=slac,dc=stanford,dc=edu` | `posixGroup` tree |
 | `LDAP_PAGE_SIZE` | `500` | the posixGroup read uses RFC 2696 paging |
-| `COACT_API_URL` | `http://coact-api-service:8000/graphql-service` | in-cluster only; identity is a trusted header |
+| `COACT_API_URL` | `http://coact-api-service:8000/graphql-service` | set to the `/graphql-service` **ingress** URL when using basic auth (e.g. `https://coact.slac.stanford.edu/graphql-service`) |
 | `COACT_SYNC_USERNAME` | `user-lookup-bot` | a plain coact user (not `isbot`: bots are implicitly admins) listed in coact-api's `POSIX_SYNC_USERNAMES` |
-| `COACT_USERNAME_HEADER` | `x-vouch-idp-claims-name` | header coact-api reads the username from |
+| `COACT_SYNC_PASSWORD` | – | basic-auth password for `COACT_SYNC_USERNAME` (htpasswd entry on the ingress). When set, the ingress authenticates the sync account and sets its identity |
+| `COACT_USERNAME_HEADER` | `x-vouch-idp-claims-name` | only without `COACT_SYNC_PASSWORD`: identity asserted as a trusted header, in-cluster only (spoofable) |
 | `URAWI_TOKEN` | – | API only; not needed by the sync scripts |
 
 The migration writes `gidnumber`, `secondarygids`, `ldapsyncedat`; the periodic sync writes only

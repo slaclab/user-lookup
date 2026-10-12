@@ -1,8 +1,10 @@
 """
 Minimal GraphQL client for the LDAP posix sync: which users to read, and pushing their snapshot to coact-api.
 
-Identity is asserted with the same header coact-api trusts from its ingress (x-vouch-idp-claims-name by
-default), so this must only ever talk to coact-api over the in-cluster service address.
+Authentication: with COACT_SYNC_PASSWORD set (the normal case), the client calls coact-api through its
+/graphql-service ingress with HTTP basic auth; the ingress validates the htpasswd entry and sets the identity
+header itself. Without it, the client falls back to asserting identity with the trusted header directly, which
+only works over the in-cluster service address and can be spoofed by anything that reaches it.
 """
 
 from os import environ
@@ -16,6 +18,8 @@ LOG = logging.getLogger(__name__)
 COACT_API_URL = environ.get('COACT_API_URL', 'http://coact-api-service:8000/graphql-service')
 COACT_SYNC_USERNAME = environ.get('COACT_SYNC_USERNAME', 'user-lookup-bot')
 COACT_USERNAME_HEADER = environ.get('COACT_USERNAME_HEADER', 'x-vouch-idp-claims-name')
+# basic-auth password for COACT_SYNC_USERNAME at the ingress; secret files can carry a trailing newline
+COACT_SYNC_PASSWORD = (environ.get('COACT_SYNC_PASSWORD') or '').strip() or None
 COACT_TIMEOUT = int(environ.get('COACT_TIMEOUT', 300))
 
 USERS_POSIX_SYNC = """
@@ -47,12 +51,18 @@ query PosixSyncStatus {
 
 class CoactClient:
     def __init__(self, url: str = COACT_API_URL, username: str = COACT_SYNC_USERNAME,
-                 header: str = COACT_USERNAME_HEADER, timeout: int = COACT_TIMEOUT):
+                 header: str = COACT_USERNAME_HEADER, timeout: int = COACT_TIMEOUT,
+                 password: Optional[str] = COACT_SYNC_PASSWORD):
         self.url = url
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"content-type": "application/json", header: username})
-        LOG.info(f"coact-api at {url} as {username}")
+        self.session.headers.update({"content-type": "application/json"})
+        if password:
+            self.session.auth = (username, password)
+            LOG.info(f"coact-api at {url} as {username} (basic auth)")
+        else:
+            self.session.headers[header] = username
+            LOG.warning(f"coact-api at {url} as {username} via trusted {header} header (no COACT_SYNC_PASSWORD set)")
 
     def execute(self, query: str, variables: Optional[dict] = None) -> dict:
         r = self.session.post(self.url, json={"query": query, "variables": variables or {}}, timeout=self.timeout)
