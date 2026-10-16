@@ -146,15 +146,36 @@ def user_filter( filter, keys={ 'username': 'uid', 'fullname': 'displayName', 'p
             # deal with wild card fullname search
     return f"(&(objectclass=person){''.join(array)})"
 
-def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userportal.slac.stanford.edu/apps/urawi/ws/user_info?psdAuthToken={token}&userid={userid}" ) -> str:
+def fetch_urawi_user_info( userid: str, token: str=None, url: str="https://userportal.slac.stanford.edu/apps/urawi/ws/user_info?psdAuthToken={token}&userid={userid}" ) -> str | None:
     if token == None:
         token = environ.get('URAWI_TOKEN')
-    r = requests.get(url.format( userid=userid, token=token ), timeout=1).json()
+    try:
+        response = requests.get(url.format( userid=userid, token=token ), timeout=1)
+        response.raise_for_status()
+        r = response.json()
+    except requests.exceptions.RequestException as e:
+        # Exception messages can contain the token-bearing URL.
+        LOG.warning("URAWI lookup for %s failed (%s); retaining LDAP-derived email",
+                    userid, type(e).__name__)
+        return None
+
+    if not isinstance(r, dict) or not isinstance(r.get('data', {}), dict):
+        LOG.warning("URAWI lookup for %s returned an invalid response; retaining LDAP-derived email", userid)
+        return None
+
+    preferredemail = r.get('data', {}).get('preferredemail')
+    if preferredemail is not None and not isinstance(preferredemail, str):
+        LOG.warning("URAWI lookup for %s returned an invalid preferredemail; retaining LDAP-derived email", userid)
+        return None
+
     LOG.debug(f"urawi request for {userid}: {r}")
-    if 'data' in r and 'preferredemail' in r['data']:
-        LOG.debug(f"  found {r['data']['preferredemail']}")
-        return r['data']['preferredemail'] 
+
+    if preferredemail:
+        LOG.debug(f"  found {preferredemail}")
+        return preferredemail
+
     LOG.debug(f"  not found")
+
     return None
 
 
